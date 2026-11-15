@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    html,body{margin:0;padding:0;width:100%;overflow:hidden;background:transparent}
+    iframe{width:100%;height:396px;border:0;display:block;background:transparent}
+  </style>
+</head>
+<body>
+  <iframe id="scene" title="LunaBase interactive scene" allow="fullscreen"></iframe>
+  <script>
+    // Minimal Streamlit Components protocol implementation.
+    // Keeping this bridge local removes the unpkg/CDN dependency that caused
+    // the component frontend to fail on restricted or slow deployments.
+    (() => {
+      const frame = document.getElementById('scene');
+      const send = (type, payload = {}) => {
+        window.parent.postMessage({isStreamlitMessage: true, type, ...payload}, '*');
+      };
+      let height = 396;
+      const setHeight = (h) => {
+        h = Math.max(200, Math.min(700, Math.round(Number(h) || 396)));
+        if (h === height && frame.style.height) return;
+        height = h;
+        frame.style.height = h + 'px';
+        send('streamlit:setFrameHeight', {height: h});
+      };
+      let renderedKey = null;
+
+      window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+
+        if (data.type === 'streamlit:render') {
+          const args = data.args || {};
+          const html = typeof args.html === 'string' ? args.html : '';
+          // Reload the scene only when the *scene itself* changed (view, language, resources, new mission...).
+          // A plain drag does not change the key, so the astronaut/rover are never reset or flickered by reruns.
+          const key = typeof args.scene_key === 'string' ? args.scene_key : html;
+          if (key !== renderedKey) {
+            renderedKey = key;
+            frame.srcdoc = html;
+          }
+          setHeight(height);
+        }
+
+        // Events sent by the scene iframe are relayed to Streamlit as the component value.
+        // Only the scene iframe (our own child) may send them.
+        if (event.source === frame.contentWindow) {
+          if (data.lunabaseSceneEvent && typeof data.lunabaseSceneEvent === 'object') {
+            send('streamlit:setComponentValue', {value: data.lunabaseSceneEvent, dataType: 'json'});
+          }
+          if (data.lunabaseFrameHeight) {
+            setHeight(data.lunabaseFrameHeight);
+          }
+          // A first touch inside the scene counts as the user gesture that unlocks the music.
+          if (data.lunabaseUnlockAudio) {
+            try { window.parent.__lbAudio && window.parent.__lbAudio.unlock(); } catch (e) { /* ignore */ }
+          }
+        }
+      });
+
+      send('streamlit:componentReady', {apiVersion: 1});
+      setHeight(396);
+    })();
+  </script>
+</body>
+</html>
